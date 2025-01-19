@@ -1,0 +1,7 @@
+.env
+venv/
+*.json
+.DS_Store
+*.png
+__pycache__/
+*.yaml
