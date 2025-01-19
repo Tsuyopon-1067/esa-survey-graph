@@ -203,9 +203,9 @@ def main() -> None:
         esa_data = client.get_esa_data_in_category()
         
         # Save to JSON file
-        output_file = 'author_stats.json'
-        save_author_stats(esa_data, output_file)
-        print(f"\nAuthor statistics have been saved to {output_file}")
+        #output_file = 'author_stats.json'
+        #save_author_stats(esa_data, output_file)
+        #print(f"\nAuthor statistics have been saved to {output_file}")
 
         create_graph(esa_data)
         
