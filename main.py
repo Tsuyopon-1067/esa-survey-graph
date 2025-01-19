@@ -8,6 +8,9 @@ from datetime import datetime
 import json
 from esa_data import Post, Author, EsaData
 from bar_plot import create_graph
+import argparse
+import schedule
+import time
 
 @dataclass
 class ApiConfig:
@@ -189,7 +192,20 @@ def save_author_stats(author_stats: EsaData, filename: str = 'author_stats.json'
         json.dump(author_stats.to_dict(), f, ensure_ascii=False, indent=2)
 
 def main() -> None:
-    """Main function to extract and save author statistics."""
+    parser = argparse.ArgumentParser(description='create esa survey graph')
+    parser.add_argument('-l', '--loop', action='store_true',
+                      help='schedule mode')
+    
+    args = parser.parse_args()
+    
+    if args.loop:
+        print("schedule mode")
+        schedule_task()
+    else:
+        fetch_data_create_graph()
+
+def fetch_data_create_graph():
+    """fetch and save author statistics."""
     try:
         print("\nInitializing configuration...")
         config = ApiConfig.from_env()
@@ -208,6 +224,7 @@ def main() -> None:
         #print(f"\nAuthor statistics have been saved to {output_file}")
 
         create_graph(esa_data)
+        print(f"Graph were created successfully: {datetime.now()}")
         
     except RequestException as e:
         print(f"API request error: {e}")
@@ -224,6 +241,18 @@ def main() -> None:
         import traceback
         print(traceback.format_exc())
 
+def schedule_task():
+    """excute fetch_data_create_graph every day at"""
+    schedule.every().day.at("00:00").do(fetch_data_create_graph)
+    
+    while True:
+        next_run = schedule.next_run()
+        if next_run:
+            time_remaining = (next_run - datetime.now()).total_seconds()
+            print(f"\r次回実行まで: {int(time_remaining)}秒", end="", flush=True)
+        
+        schedule.run_pending()
+        time.sleep(1)
 
 if __name__ == "__main__":
     main()
