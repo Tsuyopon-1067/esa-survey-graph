@@ -1,6 +1,10 @@
 # esa-survey-graph
 ## usage
 
+```bash
+python main.py
+```
+
 ## configuration
 
 Before running the application, you need to set up two configuration files:
