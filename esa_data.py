@@ -13,17 +13,45 @@ class Post:
     created_at: datetime
     url: str
     post_number: int
+    
+    def to_dict(self) -> dict:
+        return {
+            'title': self.title,
+            'created_at': self.created_at.isoformat(),
+            'url': self.url,
+            'post_number': self.post_number
+        }
 
 @dataclass
 class Author:
     screen_name: str
     post_count: int
     posts: List[Post]
+    
+    def to_dict(self) -> dict:
+        return {
+            'screen_name': self.screen_name,
+            'post_count': self.post_count,
+            'posts': [post.to_dict() for post in self.posts]
+        }
 
 @dataclass
 class EsaData:
     total_authors: int
     authors: Dict[str, Author]
+    
+    def to_dict(self) -> dict:
+        return {
+            'total_authors': self.total_authors,
+            'authors': {
+                screen_name: author.to_dict()
+                for screen_name, author in sorted(
+                    self.authors.items(),
+                    key=lambda x: x[1].post_count,
+                    reverse=True
+                )
+            }
+        }
 
 @dataclass
 class GroupedAuthors:

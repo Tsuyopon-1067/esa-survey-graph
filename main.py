@@ -6,6 +6,7 @@ import requests
 from requests.exceptions import RequestException
 from datetime import datetime
 import json
+from esa_data import Post, Author, EsaData
 
 
 @dataclass
@@ -37,44 +38,6 @@ class ApiConfig:
         )
 
 
-@dataclass
-class PostInfo:
-    """Data class for post information."""
-    title: str
-    created_at: datetime
-    url: str
-    post_number: int
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert PostInfo to dictionary format."""
-        return {
-            'title': self.title,
-            'created_at': self.created_at.isoformat(),
-            'url': self.url,
-            'post_number': self.post_number
-        }
-
-
-@dataclass
-class AuthorStats:
-    """Data class for author statistics."""
-    screen_name: str
-    post_count: int
-    posts: List[PostInfo]
-
-    def to_dict(self) -> Dict[str, Any]:
-        """Convert AuthorStats to dictionary format."""
-        return {
-            'screen_name': self.screen_name,
-            'post_count': self.post_count,
-            'posts': [post.to_dict() for post in sorted(
-                self.posts,
-                key=lambda x: x.created_at,
-                reverse=True
-            )]
-        }
-
-
 class EsaClient:
     """Enhanced ESA client with author statistics and improved pagination."""
     
@@ -86,7 +49,7 @@ class EsaClient:
             "Content-Type": "application/json"
         }
 
-    def get_all_posts_in_category(self, category: str = None) -> List[Dict]:
+    def get_all_posts_in_category(self, category: str = '') -> List[Dict]:
         """Fetch all posts from a category across all pages."""
         category = category or self.config.category
         all_posts = []
@@ -131,7 +94,7 @@ class EsaClient:
 
     def get_posts_in_category(
         self,
-        category: str = None,
+        category: str = '',
         page: int = 1,
         per_page: int = 100
     ) -> Dict:
@@ -152,50 +115,78 @@ class EsaClient:
         response.raise_for_status()
         return response.json()
 
-    def get_author_stats(self, posts: List[Dict]) -> Dict[str, AuthorStats]:
-        """Extract detailed author statistics from posts."""
-        authors: Dict[str, AuthorStats] = {}
+    def get_esa_data_in_category(self, category: str = '') -> EsaData:
+        """Fetch all posts from a category and organize them by author into EsaData structure."""
+        category = category or self.config.category
+        authors_dict: Dict[str, List[Post]] = {}
+        page = 1
+        total_count = None
         
-        for post in posts:
-            author = post.get('created_by', {}).get('screen_name', 'Unknown')
-            
-            post_info = PostInfo(
-                title=post.get('full_name', 'Untitled'),
-                created_at=datetime.fromisoformat(post['created_at'].replace('Z', '+00:00')),
-                url=post.get('url', ''),
-                post_number=post.get('number', 0)
-            )
-            
-            if author not in authors:
-                authors[author] = AuthorStats(
-                    screen_name=author,
-                    post_count=1,
-                    posts=[post_info]
-                )
-            else:
-                authors[author].post_count += 1
-                authors[author].posts.append(post_info)
+        while True:
+            try:
+                response = self.get_posts_in_category(category, page=page)
+                posts = response.get('posts', [])
+                
+                if total_count is None:
+                    total_count = response.get('total_count', 0)
+                    print(f"\nTotal posts to fetch: {total_count}")
+                
+                if not posts:
+                    print("No more posts found in this response")
+                    break
+                    
+                # Group posts by author
+                for post in posts:
+                    post_obj = Post(
+                        title=post['name'],
+                        created_at=datetime.fromisoformat(post['created_at']),
+                        url=post['url'],
+                        post_number=post['number']
+                    )
+                    
+                    author_name = post.get('created_by', {}).get('screen_name', 'unknown')
+                    if author_name not in authors_dict:
+                        authors_dict[author_name] = []
+                    authors_dict[author_name].append(post_obj)
+                
+                print(f"Progress: {sum(len(posts) for posts in authors_dict.values())}/{total_count} posts collected")
+                
+                if not response.get('next_page'):
+                    print("No next page available")
+                    break
+                    
+                page += 1
+                
+            except RequestException as e:
+                print(f"Error fetching page {page}: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"Response status code: {e.response.status_code}")
+                    try:
+                        print(f"Response content: {e.response.json()}")
+                    except:
+                        print(f"Response text: {e.response.text}")
+                break
         
-        return authors
-
-
-def save_author_stats(author_stats: Dict[str, AuthorStats], filename: str = 'author_stats.json') -> None:
-    """Save author statistics to a JSON file."""
-    output = {
-        'total_authors': len(author_stats),
-        'authors': {
-            author: stats.to_dict()
-            for author, stats in sorted(
-                author_stats.items(),
-                key=lambda x: x[1].post_count,
-                reverse=True
+        # Convert the grouped posts into Author objects
+        authors = {
+            name: Author(
+                screen_name=name,
+                post_count=len(posts),
+                posts=posts
             )
+            for name, posts in authors_dict.items()
         }
-    }
-    
-    with open(filename, 'w', encoding='utf-8') as f:
-        json.dump(output, f, ensure_ascii=False, indent=2)
+        
+        return EsaData(
+            total_authors=len(authors),
+            authors=authors
+        )
 
+
+def save_author_stats(author_stats: EsaData, filename: str = 'author_stats.json') -> None:
+    """Save author statistics to a JSON file."""
+    with open(filename, 'w', encoding='utf-8') as f:
+        json.dump(author_stats.to_dict(), f, ensure_ascii=False, indent=2)
 
 def main() -> None:
     """Main function to extract and save author statistics."""
@@ -205,21 +196,16 @@ def main() -> None:
         print(f"Team name: {config.team_name}")
         print(f"Category: {config.category}")
         
-        print("\nInitializing ESA client...")
+        print("\nInitializing esa client...")
         client = EsaClient(config)
         
         print("\nStarting to fetch posts...")
-        all_posts = client.get_all_posts_in_category()
-        print(f"\nTotal posts fetched: {len(all_posts)}")
-        
-        print("\nProcessing author statistics...")
-        author_stats = client.get_author_stats(all_posts)
+        esa_data = client.get_esa_data_in_category()
         
         # Save to JSON file
         output_file = 'author_stats.json'
-        save_author_stats(author_stats, output_file)
+        save_author_stats(esa_data, output_file)
         print(f"\nAuthor statistics have been saved to {output_file}")
-        print(f"Total unique authors: {len(author_stats)}")
         
     except RequestException as e:
         print(f"API request error: {e}")
