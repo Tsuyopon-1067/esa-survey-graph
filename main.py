@@ -76,7 +76,7 @@ class AuthorStats:
 
 
 class EsaClient:
-    """Enhanced ESA client with detailed author statistics."""
+    """Enhanced ESA client with author statistics and improved pagination."""
     
     def __init__(self, config: ApiConfig):
         self.config = config
@@ -91,25 +91,40 @@ class EsaClient:
         category = category or self.config.category
         all_posts = []
         page = 1
+        total_count = None
         
         while True:
             try:
                 response = self.get_posts_in_category(category, page=page)
                 posts = response.get('posts', [])
                 
+                # Get total count on first page
+                if total_count is None:
+                    total_count = response.get('total_count', 0)
+                    print(f"\nTotal posts to fetch: {total_count}")
+                
                 if not posts:
+                    print("No more posts found in this response")
                     break
                     
                 all_posts.extend(posts)
+                print(f"Progress: {len(all_posts)}/{total_count} posts collected")
                 
-                if page >= response.get('total_pages', 1):
+                # Check for next page instead of total_pages
+                if not response.get('next_page'):
+                    print("No next page available")
                     break
                     
                 page += 1
-                print(f"Fetched page {page}/{response.get('total_pages', 1)}")
                 
             except RequestException as e:
                 print(f"Error fetching page {page}: {e}")
+                if hasattr(e, 'response') and e.response is not None:
+                    print(f"Response status code: {e.response.status_code}")
+                    try:
+                        print(f"Response content: {e.response.json()}")
+                    except:
+                        print(f"Response text: {e.response.text}")
                 break
                 
         return all_posts
@@ -132,23 +147,13 @@ class EsaClient:
             "order": "desc"
         }
         
+        print(f"Fetching page {page}...")
         response = requests.get(url, headers=self.headers, params=params)
         response.raise_for_status()
         return response.json()
 
     def get_author_stats(self, posts: List[Dict]) -> Dict[str, AuthorStats]:
-        """Extract detailed author statistics from posts.
-        
-        Parameters
-        ----------
-        posts : List[Dict]
-            List of post data from the API
-            
-        Returns
-        -------
-        Dict[str, AuthorStats]
-            Dictionary mapping author names to their detailed statistics
-        """
+        """Extract detailed author statistics from posts."""
         authors: Dict[str, AuthorStats] = {}
         
         for post in posts:
@@ -175,15 +180,7 @@ class EsaClient:
 
 
 def save_author_stats(author_stats: Dict[str, AuthorStats], filename: str = 'author_stats.json') -> None:
-    """Save author statistics to a JSON file.
-    
-    Parameters
-    ----------
-    author_stats : Dict[str, AuthorStats]
-        Dictionary of author statistics
-    filename : str, optional
-        Output JSON filename, by default 'author_stats.json'
-    """
+    """Save author statistics to a JSON file."""
     output = {
         'total_authors': len(author_stats),
         'authors': {
@@ -203,14 +200,19 @@ def save_author_stats(author_stats: Dict[str, AuthorStats], filename: str = 'aut
 def main() -> None:
     """Main function to extract and save author statistics."""
     try:
+        print("\nInitializing configuration...")
         config = ApiConfig.from_env()
+        print(f"Team name: {config.team_name}")
+        print(f"Category: {config.category}")
+        
+        print("\nInitializing ESA client...")
         client = EsaClient(config)
         
-        print("Fetching all posts...")
+        print("\nStarting to fetch posts...")
         all_posts = client.get_all_posts_in_category()
-        print(f"Total posts fetched: {len(all_posts)}")
+        print(f"\nTotal posts fetched: {len(all_posts)}")
         
-        # Get detailed author statistics
+        print("\nProcessing author statistics...")
         author_stats = client.get_author_stats(all_posts)
         
         # Save to JSON file
@@ -221,10 +223,18 @@ def main() -> None:
         
     except RequestException as e:
         print(f"API request error: {e}")
+        if hasattr(e, 'response') and e.response is not None:
+            print(f"Response status code: {e.response.status_code}")
+            try:
+                print(f"Response content: {e.response.json()}")
+            except:
+                print(f"Response text: {e.response.text}")
     except ValueError as e:
         print(f"Configuration error: {e}")
     except Exception as e:
         print(f"Unexpected error: {e}")
+        import traceback
+        print(traceback.format_exc())
 
 
 if __name__ == "__main__":
