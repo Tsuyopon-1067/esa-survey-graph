@@ -1,11 +1,15 @@
 from dataclasses import dataclass
 from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Tuple
-import json
+from matplotlib.figure import Figure
+from matplotlib.axes import Axes
+import yaml
 import matplotlib.pyplot as plt
 import numpy as np
 import os
+from pathlib import Path
 from dotenv import load_dotenv
+from esa_data import EsaData, load_esa_data
 
 @dataclass
 class Config:
@@ -100,7 +104,7 @@ class PostAnalyzer:
     def __init__(self, year_manager: AcademicYearManager):
         self.year_manager = year_manager
     
-    def count_posts_by_year(self, data: Dict, target_years: List[int]) -> Dict[int, Dict[str, int]]:
+    def count_posts_by_year(self, data: EsaData, target_years: List[int]) -> Dict[int, Dict[str, int]]:
         """Count posts for each author grouped by academic year.
 
         Parameters
@@ -117,9 +121,9 @@ class PostAnalyzer:
         """
         counts = {year: {} for year in target_years}
         
-        for author_name, author_data in data['authors'].items():
-            for post in author_data['posts']:
-                post_date = datetime.fromisoformat(post['created_at'].replace('Z', '+00:00'))
+        for author_name, author_data in data.authors.items():
+            for post in author_data.posts:
+                post_date = post.created_at
                 
                 for year in target_years:
                     if self.year_manager.is_in_academic_year(post_date, year):
@@ -140,7 +144,7 @@ class ChartGenerator:
         self.timezone = timezone_info
         self.colors = ['#4c72b0', '#dd8453', '#55a868']
     
-    def _create_fig_template(self, sorted_author_names: List[str]) -> Tuple[plt.Figure, plt.Axes, np.ndarray]:
+    def _create_fig_template(self, sorted_author_names: List[str]) -> Tuple[Figure, Axes, np.ndarray]:
         """Create a template for matplotlib figure with common styling.
 
         Parameters
@@ -266,7 +270,7 @@ class ChartGenerator:
         }
         return sorted(author_total_posts.items(), key=lambda x: x[1], reverse=True)
     
-    def _create_stacked_bars(self, ax: plt.Axes, post_counts: Dict, 
+    def _create_stacked_bars(self, ax: Axes, post_counts: Dict, 
                            target_years: List[int], sorted_authors: List[str], 
                            bottom: np.ndarray):
         """Create stacked bars for each year.
@@ -296,7 +300,7 @@ class ChartGenerator:
                   zorder=3)
             bottom += values
     
-    def _add_total_labels(self, ax: plt.Axes, author_stats: List[Tuple[str, int]]):
+    def _add_total_labels(self, ax: Axes, author_stats: List[Tuple[str, int]]):
         """Add total count labels on top of bars.
 
         Parameters
@@ -315,7 +319,7 @@ class ChartGenerator:
                        fontweight='medium',
                        zorder=4)
     
-    def _finalize_chart(self, fig: plt.Figure, ax: plt.Axes, output_path: str):
+    def _finalize_chart(self, fig: Figure, ax: Axes, output_path: str):
         """Apply final touches to the chart and save.
 
         Parameters
@@ -360,6 +364,9 @@ def create_graph(data):
     year_manager = AcademicYearManager(config.jst)
     current_year = year_manager.get_current_year()
     target_years = year_manager.get_target_years()
+    yaml_path = os.getenv('YAML_PATH')
+    if yaml_path is not None:
+        data = filter_authors(data, yaml_path)
     
     print(f"Current academic year: {current_year}")
     print(f"Analyzing academic years: {target_years}")
@@ -371,12 +378,62 @@ def create_graph(data):
     chart_generator.create_current_year_chart(post_counts, current_year, config.ranking_path)
     chart_generator.create_stacked_chart(post_counts, target_years, config.ranking_all_path)
 
+def filter_authors(json_data: EsaData, yaml_path: str) -> EsaData:
+    """
+    Filter authors based on a list of valid users from a YAML file.
+    
+    Parameters
+    ----------
+    json_data : EsaData
+        Original EsaData object containing all authors
+    yaml_path : str
+        Path to YAML file containing valid user list
+        
+    Returns
+    -------
+    EsaData
+        Filtered EsaData object containing only valid authors
+    """
+    if not Path(yaml_path).exists():
+        raise FileNotFoundError(f"YAML file not found: {yaml_path}")
+    
+    # Load valid users from YAML
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML file: {e}")
+    
+    if 'valid_users' not in config:
+        raise KeyError("'valid_users' key not found in YAML file")
+        
+    valid_users = set(config['valid_users'])
+    
+    # Create new EsaData object with only valid authors
+    filtered_authors = {
+        name: author_data 
+        for name, author_data in json_data.authors.items()
+        if name in valid_users
+    }
+    
+    filtered_data = EsaData(
+        total_authors=len(filtered_authors),
+        authors=filtered_authors
+    )
+    
+    # Check if any valid users were not found in the JSON data
+    found_users = set(filtered_authors.keys())
+    missing_users = valid_users - found_users
+    if missing_users:
+        print(f"Warning: Some users from YAML were not found in JSON: {missing_users}")
+    
+    return filtered_data
+
 def main():
     """Main function to generate survey ranking visualizations."""
     
     config = load_config()
-    with open(config.json_path, 'r', encoding='utf-8') as f:
-        data = json.load(f)
+    data: EsaData = load_esa_data(config.json_path)
     create_graph(data)
     
 if __name__ == "__main__":
