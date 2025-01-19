@@ -1,13 +1,13 @@
 import os
 from dataclasses import dataclass
-from typing import Dict, List, Any
+from typing import Dict, List
 from dotenv import load_dotenv
 import requests
 from requests.exceptions import RequestException
 from datetime import datetime
 import json
 from esa_data import Post, Author, EsaData
-
+from bar_plot import create_graph
 
 @dataclass
 class ApiConfig:
@@ -206,6 +206,8 @@ def main() -> None:
         output_file = 'author_stats.json'
         save_author_stats(esa_data, output_file)
         print(f"\nAuthor statistics have been saved to {output_file}")
+
+        create_graph(esa_data)
         
     except RequestException as e:
         print(f"API request error: {e}")
