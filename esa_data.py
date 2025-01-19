@@ -25,6 +25,17 @@ class EsaData:
     total_authors: int
     authors: Dict[str, Author]
 
+@dataclass
+class GroupedAuthors:
+    """Container for grouped author data.
+    
+    Attributes
+    ----------
+    groups : Dict[str, List[Author]]
+        Dictionary mapping group names to lists of Author objects.
+    """
+    groups: Dict[str, List[Author]]
+
 
 def convert_to_post(post_data: Dict[str, Any]) -> Post:
     """Convert dictionary to Post object"""
@@ -120,3 +131,44 @@ def filter_authors(json_data: EsaData, yaml_path: str) -> EsaData:
         print(f"Warning: Some users from YAML were not found in JSON: {missing_users}")
     
     return filtered_data
+
+def create_group_authors(esa_data: EsaData, yaml_path: str) -> GroupedAuthors:
+    """Create grouped author data from YAML configuration.
+
+    Parameters
+    ----------
+    esa_data : EsaData
+        Source data containing author information.
+    yaml_path : str
+        Path to YAML file.
+
+    Returns
+    -------
+    GroupedAuthors
+        Author data organized by groups.
+
+    Notes
+    -----
+    Authors specified in yaml_data but not present in esa_data will be silently ignored.
+
+    Raises
+    ------
+    ValueError
+        If the YAML file is invalid or cannot be parsed.
+    """
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML file: {e}")
+    
+    groups = {}
+    
+    for group_name, members in config.get('groups', {}).items():
+        groups[group_name] = [
+            esa_data.authors[member_name]
+            for member_name in members
+            if member_name in esa_data.authors
+        ]
+        
+    return GroupedAuthors(groups=groups)

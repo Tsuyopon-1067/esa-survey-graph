@@ -7,7 +7,7 @@ import matplotlib.pyplot as plt
 import numpy as np
 import os
 from dotenv import load_dotenv
-from esa_data import EsaData, filter_authors, load_esa_data
+from esa_data import EsaData, GroupedAuthors, create_group_authors, filter_authors, load_esa_data
 
 @dataclass
 class Config:
@@ -21,12 +21,15 @@ class Config:
         Path where the current year ranking chart will be saved
     ranking_all_path : str
         Path where the multi-year stacked chart will be saved
+    ranking_group_path : str
+        Path where the current year group ranking chart will be saved
     jst : timezone, optional
         Japanese timezone information, by default timezone(timedelta(hours=+9))
     """
     json_path: str
     ranking_path: str
     ranking_all_path: str
+    ranking_group_path: str
     jst: timezone = timezone(timedelta(hours=+9))
 
 class AcademicYearManager:
@@ -254,6 +257,71 @@ class ChartGenerator:
         self._add_total_labels(ax, author_stats)
         
         self._finalize_chart(fig, ax, output_path)
+
+    def create_group_chart(self, post_counts: Dict[int, Dict[str, int]], 
+                             current_year: int, grouped_authors: GroupedAuthors,
+                             output_path: str):
+        """Create bar chart for current academic year's survey rankings by group.
+
+        Parameters
+        ----------
+        post_counts : Dict[int, Dict[str, int]]
+            Dictionary containing post counts by year and author
+        current_year : int
+            Current academic year
+        grouped_authors : GroupedAuthors
+            Grouped author data
+        output_path : str
+            Path where the chart should be saved
+        """
+        # Calculate total posts for each group
+        group_totals = {}
+        for group_name, authors in grouped_authors.groups.items():
+            total = sum(
+                post_counts[current_year].get(author.screen_name, 0)
+                for author in authors
+            )
+            if total > 0:  # Only include groups with posts
+                group_totals[group_name] = total
+        
+        # Sort groups by total posts
+        sorted_groups = dict(sorted(
+            group_totals.items(),
+            key=lambda x: x[1],
+            reverse=True
+        ))
+        
+        group_names = list(sorted_groups.keys())
+        counts = list(sorted_groups.values())
+
+        # Create chart
+        fig, ax, _ = self._create_fig_template(group_names)
+        
+        # Customize chart for group display
+        ax.set_xlabel('Group name', fontsize=self.AXIS_FONT_SIZE)
+        bars = ax.bar(group_names, counts,
+                     width=0.5,
+                     label=str(current_year),
+                     edgecolor='white',
+                     linewidth=1.5,
+                     color=self.colors[0],
+                     zorder=3)
+        
+        now = datetime.now(self.timezone)
+        ax.set_title(f'Group Survey Total {current_year} / '
+                    f'updated: {now.strftime("%Y/%m/%d")}',
+                    fontsize=self.TITLE_FONT_SIZE)
+        
+        # Add value labels on top of bars
+        for bar in bars:
+            height = bar.get_height()
+            if height > 0:
+                ax.text(bar.get_x() + bar.get_width()/2., height,
+                       f'{int(height)}',
+                       ha='center', va='bottom',
+                       fontsize=self.BAR_TOP_FONT_SIZE)
+        
+        self._finalize_chart(fig, ax, output_path)
     
     def _calculate_author_statistics(self, post_counts: Dict, 
                                   target_years: List[int]) -> List[Tuple[str, int]]:
@@ -345,7 +413,6 @@ class ChartGenerator:
         
         plt.tight_layout()
         fig.savefig(output_path, dpi=96, bbox_inches='tight')
-        plt.show()
         plt.close()
 
 def load_config() -> Config:
@@ -362,10 +429,15 @@ def load_config() -> Config:
     if ranking_all_path is None:
         raise ValueError("ESA_RANKING_ALL environment variable is not set")
         
+    group_ranking_path = os.getenv('ESA_RANKING_GROUP')
+    if group_ranking_path is None:
+        raise ValueError("ESA_RANKING_GROUP environment variable is not set")
+
     return Config(
         json_path=json_path,
         ranking_path=ranking_path,
-        ranking_all_path=ranking_all_path
+        ranking_all_path=ranking_all_path,
+        ranking_group_path=group_ranking_path
     )
 
 def create_graph(data):
@@ -374,18 +446,24 @@ def create_graph(data):
     current_year = year_manager.get_current_year()
     target_years = year_manager.get_target_years()
     yaml_path = os.getenv('YAML_PATH')
-    if yaml_path is not None:
-        data = filter_authors(data, yaml_path)
+    if yaml_path is None:
+        print('YAML_PATH environment variable is not set')
+        return
     
+    data = filter_authors(data, yaml_path)
+
     print(f"Current academic year: {current_year}")
     print(f"Analyzing academic years: {target_years}")
 
     analyzer = PostAnalyzer(year_manager)
     post_counts = analyzer.count_posts_by_year(data, target_years)
+
+    grouped_authors = create_group_authors(data, yaml_path)
     
     chart_generator = ChartGenerator(config.jst)
     chart_generator.create_current_year_chart(post_counts, current_year, config.ranking_path)
     chart_generator.create_stacked_chart(post_counts, target_years, config.ranking_all_path)
+    chart_generator.create_group_chart(post_counts, current_year, grouped_authors, config.ranking_group_path)
 
 def main():
     """Main function to generate survey ranking visualizations."""
