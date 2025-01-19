@@ -3,13 +3,11 @@ from datetime import datetime, timezone, timedelta
 from typing import Dict, List, Tuple
 from matplotlib.figure import Figure
 from matplotlib.axes import Axes
-import yaml
 import matplotlib.pyplot as plt
 import numpy as np
 import os
-from pathlib import Path
 from dotenv import load_dotenv
-from esa_data import EsaData, load_esa_data
+from esa_data import EsaData, filter_authors, load_esa_data
 
 @dataclass
 class Config:
@@ -139,6 +137,10 @@ class ChartGenerator:
     timezone_info : timezone
         Timezone information for date display
     """
+    BAR_TOP_FONT_SIZE = 16
+    LEGEND_FONT_SIZE = 18
+    TITLE_FONT_SIZE = 18
+    AXIS_FONT_SIZE = 18
     
     def __init__(self, timezone_info: timezone):
         self.timezone = timezone_info
@@ -157,7 +159,10 @@ class ChartGenerator:
         Tuple[plt.Figure, plt.Axes, np.ndarray]
             Tuple containing figure, axis, and bottom array for stacking
         """
-        fig, ax = plt.subplots(figsize=(15, 8))
+        dpi = 96
+        width_inches = 1258 / dpi
+        height_inches = 977 / dpi
+        fig, ax = plt.subplots(figsize=(width_inches, height_inches), dpi=dpi)
         ax.set_facecolor('#eaeaf2')
         fig.patch.set_facecolor('white')
 
@@ -167,12 +172,15 @@ class ChartGenerator:
 
         bottom = np.zeros(len(sorted_author_names))
         
-        ax.grid(True, color='white', linewidth=1.0, zorder=0)
+        ax.grid(True, color='white', linewidth=1.5, zorder=0)
         ax.set_xlabel('Username')
         ax.set_ylabel('# of surveyed papers')
+        ax.set_xlabel('Username', fontsize=self.AXIS_FONT_SIZE)
+        ax.set_ylabel('# of surveyed papers', fontsize=self.AXIS_FONT_SIZE)
         
         ax.set_xticks(range(len(sorted_author_names)))
-        ax.set_xticklabels(sorted_author_names, rotation=90, ha='center', va='top')
+        ax.set_xticklabels(sorted_author_names, rotation=90, ha='center', va='top', fontsize=self.AXIS_FONT_SIZE)
+        ax.tick_params(axis='y', labelsize=self.AXIS_FONT_SIZE)
         
         plt.tight_layout()
         return fig, ax, bottom
@@ -204,11 +212,11 @@ class ChartGenerator:
                      width=0.5,
                      label=str(current_year),
                      edgecolor='white',
-                     linewidth=1,
+                     linewidth=1.5,
                      zorder=3)
         
         now = datetime.now(self.timezone)
-        ax.set_title(f'Survey ranking {current_year} / updated: {now.strftime("%Y/%m/%d")}')
+        ax.set_title(f'Survey ranking {current_year} / updated: {now.strftime("%Y/%m/%d")}', fontsize=self.TITLE_FONT_SIZE)
         ax.grid(True, axis='y', alpha=0.3)
         
         for bar in bars:
@@ -216,7 +224,7 @@ class ChartGenerator:
             if height > 0:
                 ax.text(bar.get_x() + bar.get_width()/2., height,
                        f'{int(height)}',
-                       ha='center', va='bottom')
+                       ha='center', va='bottom',fontsize=self.BAR_TOP_FONT_SIZE,)
         
         self._finalize_chart(fig, ax, output_path)
     
@@ -240,7 +248,7 @@ class ChartGenerator:
         
         now = datetime.now(self.timezone)
         ax.set_title(f'Survey ranking {min(target_years)}-{max(target_years)} / '
-                    f'updated: {now.strftime("%Y/%m/%d")}')
+                    f'updated: {now.strftime("%Y/%m/%d")}', fontsize=self.TITLE_FONT_SIZE)
         
         self._create_stacked_bars(ax, post_counts, target_years, sorted_author_names, bottom)
         self._add_total_labels(ax, author_stats)
@@ -296,7 +304,7 @@ class ChartGenerator:
                   label=str(year),
                   color=self.colors[i],
                   edgecolor='white',
-                  linewidth=1,
+                  linewidth=1.5,
                   zorder=3)
             bottom += values
     
@@ -315,7 +323,7 @@ class ChartGenerator:
             if total > 0:
                 ax.text(i, total + y_margin, str(int(total)),
                        ha='center', va='bottom',
-                       fontsize=12,
+                       fontsize=self.BAR_TOP_FONT_SIZE,
                        fontweight='medium',
                        zorder=4)
     
@@ -331,12 +339,13 @@ class ChartGenerator:
         output_path : str
             Path where the chart should be saved
         """
-        ax.margins(x=0.01)
+        ax.margins(x=0.02)
         legend = ax.legend(bbox_to_anchor=(1, 1), loc='upper right')
-        plt.setp(legend.get_texts(), fontsize=14)
+        plt.setp(legend.get_texts(), fontsize=self.LEGEND_FONT_SIZE)
         
         plt.tight_layout()
-        fig.savefig(output_path, dpi=300, bbox_inches='tight')
+        fig.savefig(output_path, dpi=96, bbox_inches='tight')
+        plt.show()
         plt.close()
 
 def load_config() -> Config:
@@ -377,57 +386,6 @@ def create_graph(data):
     chart_generator = ChartGenerator(config.jst)
     chart_generator.create_current_year_chart(post_counts, current_year, config.ranking_path)
     chart_generator.create_stacked_chart(post_counts, target_years, config.ranking_all_path)
-
-def filter_authors(json_data: EsaData, yaml_path: str) -> EsaData:
-    """
-    Filter authors based on a list of valid users from a YAML file.
-    
-    Parameters
-    ----------
-    json_data : EsaData
-        Original EsaData object containing all authors
-    yaml_path : str
-        Path to YAML file containing valid user list
-        
-    Returns
-    -------
-    EsaData
-        Filtered EsaData object containing only valid authors
-    """
-    if not Path(yaml_path).exists():
-        raise FileNotFoundError(f"YAML file not found: {yaml_path}")
-    
-    # Load valid users from YAML
-    try:
-        with open(yaml_path, 'r', encoding='utf-8') as f:
-            config = yaml.safe_load(f)
-    except yaml.YAMLError as e:
-        raise ValueError(f"Invalid YAML file: {e}")
-    
-    if 'valid_users' not in config:
-        raise KeyError("'valid_users' key not found in YAML file")
-        
-    valid_users = set(config['valid_users'])
-    
-    # Create new EsaData object with only valid authors
-    filtered_authors = {
-        name: author_data 
-        for name, author_data in json_data.authors.items()
-        if name in valid_users
-    }
-    
-    filtered_data = EsaData(
-        total_authors=len(filtered_authors),
-        authors=filtered_authors
-    )
-    
-    # Check if any valid users were not found in the JSON data
-    found_users = set(filtered_authors.keys())
-    missing_users = valid_users - found_users
-    if missing_users:
-        print(f"Warning: Some users from YAML were not found in JSON: {missing_users}")
-    
-    return filtered_data
 
 def main():
     """Main function to generate survey ranking visualizations."""

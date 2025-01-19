@@ -3,6 +3,8 @@ from typing import List, Dict
 from datetime import datetime
 from datetime import datetime
 import json
+import yaml
+from pathlib import Path
 from typing import Dict, Any
 
 @dataclass
@@ -78,3 +80,43 @@ def load_esa_data(json_path: str) -> EsaData:
         raise json.JSONDecodeError(f"Invalid JSON file: {e.msg}", e.doc, e.pos)
     except FileNotFoundError:
         raise FileNotFoundError(f"JSON file not found: {json_path}")
+
+def filter_authors(json_data: EsaData, yaml_path: str) -> EsaData:
+    """
+    Filter authors based on a list of valid users from a YAML file.
+    Authors will be ordered according to the order in YAML file.
+    """
+    if not Path(yaml_path).exists():
+        raise FileNotFoundError(f"YAML file not found: {yaml_path}")
+    
+    # Load valid users from YAML
+    try:
+        with open(yaml_path, 'r', encoding='utf-8') as f:
+            config = yaml.safe_load(f)
+    except yaml.YAMLError as e:
+        raise ValueError(f"Invalid YAML file: {e}")
+    
+    if 'valid_users' not in config:
+        raise KeyError("'valid_users' key not found in YAML file")
+        
+    valid_users = config['valid_users']  # リストとして保持して順序を維持
+    valid_users_set = set(valid_users)   # 検索用にセットも作成
+    
+    # Create new EsaData object with only valid authors, maintaining YAML order
+    filtered_authors = {}
+    for name in valid_users:  # YAMLの順序でループ
+        if name in json_data.authors:
+            filtered_authors[name] = json_data.authors[name]
+    
+    filtered_data = EsaData(
+        total_authors=len(filtered_authors),
+        authors=filtered_authors
+    )
+    
+    # Check if any valid users were not found in the JSON data
+    found_users = set(filtered_authors.keys())
+    missing_users = valid_users_set - found_users
+    if missing_users:
+        print(f"Warning: Some users from YAML were not found in JSON: {missing_users}")
+    
+    return filtered_data
