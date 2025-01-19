@@ -12,6 +12,7 @@ pillow==11.1.0
 pyparsing==3.2.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.0.1
+PyYAML==6.0.2
 requests==2.32.3
 six==1.17.0
 urllib3==2.3.0
